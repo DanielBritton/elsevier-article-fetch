@@ -31,23 +31,30 @@ unique_authors = {}
 
 # Function to fetch detailed author and affiliation information
 def fetch_author_details(author_affiliation_url):
-    response = requests.get(author_affiliation_url, headers={'X-ELS-APIKey': API_KEY})
-    if response.status_code == 200:
-        # Parse the JSON response to extract author details
-        try:
-            author_details = response.json().get('abstracts-retrieval-response', {})
-            authors = author_details.get('authors', {}).get('author', [])
+    headers = {
+        'X-ELS-APIKey': API_KEY,
+        'X-ELS-Insttoken': INST_TOKEN
+    }
+    try:
+        response = requests.get(author_affiliation_url, headers=headers, verify=True)
+        if response.status_code == 200:
+            # Parse the JSON response to extract author details
+            author_details = response.json()
+            print(f"Author details fetched: {author_details}")  # Debug: Print author details
+            authors = author_details.get('abstracts-retrieval-response', {}).get('authors', {}).get('author', [])
             author_info = []
             for author in authors:
                 authid = author.get('@auid', '')
                 authname = author.get('preferred-name', {}).get('surname', '') + ", " + author.get('preferred-name', {}).get('given-name', '')
                 author_info.append({'authid': authid, 'authname': authname})
             return author_info
-        except (ValueError, KeyError) as e:
-            print(f"Error parsing author details: {e}")
-            return []
-    else:
-        print(f"Failed to fetch author details: {response.status_code}")
+        else:
+            print(f"Failed to fetch author details: Status code {response.status_code}")
+            print(f"Response content: {response.content}")  # Debug: Print response content
+    except json.JSONDecodeError as e:
+        print(f"Error parsing author details: {e}")
+    except Exception as e:
+        print(f"Unexpected error fetching author details: {e}")
     return []
 
 # Fetch and process articles for each journal
@@ -82,6 +89,8 @@ for journal in data['journals']:
         # Extract relevant information for each article
         title = article.get('dc:title', '')
         author_link = next((link['@href'] for link in article['link'] if link['@ref'] == 'author-affiliation'), None)
+        if author_link:
+            print(f"Fetching author details from: {author_link}")  # Debug: Print author link
         authors_data = fetch_author_details(author_link) if author_link else []
         authors = '; '.join([f"{author.get('authname', '')} ({author.get('authid', '')})" for author in authors_data])
         affiliations = '; '.join([affil.get('affilname', '') for affil in article.get('affiliation', [])])
