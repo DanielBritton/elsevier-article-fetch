@@ -1,8 +1,8 @@
 import json
 import csv
+import requests
 from elsapy.elsclient import ElsClient
 from elsapy.elssearch import ElsSearch
-from elsapy.elsprofile import ElsAuthor
 import os
 
 # Load the credentials from a JSON file
@@ -21,19 +21,34 @@ if INST_TOKEN:
 with open('journals.json', 'r') as file:
     data = json.load(file)
 
-# Directory to save CSV files
+# Directory to save CSV files and raw data
 os.makedirs('articles', exist_ok=True)
+os.makedirs('raw_data', exist_ok=True)
 
 # Initialize lists to store all articles and unique authors
 all_articles_data = []
 unique_authors = {}
 
-# Function to fetch h-index for an author
-def fetch_h_index(author_id):
-    author = ElsAuthor(uri=f"https://api.elsevier.com/content/author/author_id/{author_id}?apiKey={API_KEY}")
-    if author.read(client):
-        return author.data.get('h-index', 'N/A')
-    return 'N/A'
+# Function to fetch detailed author and affiliation information
+def fetch_author_details(author_affiliation_url):
+    response = requests.get(author_affiliation_url, headers={'X-ELS-APIKey': API_KEY})
+    if response.status_code == 200:
+        # Parse the JSON response to extract author details
+        try:
+            author_details = response.json().get('abstracts-retrieval-response', {})
+            authors = author_details.get('authors', {}).get('author', [])
+            author_info = []
+            for author in authors:
+                authid = author.get('@auid', '')
+                authname = author.get('preferred-name', {}).get('surname', '') + ", " + author.get('preferred-name', {}).get('given-name', '')
+                author_info.append({'authid': authid, 'authname': authname})
+            return author_info
+        except (ValueError, KeyError) as e:
+            print(f"Error parsing author details: {e}")
+            return []
+    else:
+        print(f"Failed to fetch author details: {response.status_code}")
+    return []
 
 # Fetch and process articles for each journal
 for journal in data['journals']:
@@ -47,8 +62,13 @@ for journal in data['journals']:
     
     articles = search.results
     
-    # In test mode, limit the number of articles
+    # In test mode, save raw data and limit the number of articles
     if TEST_MODE:
+        # Save raw data to a file
+        raw_filename = os.path.join('raw_data', f"{journal_name.replace(' ', '_')}_raw_data.json")
+        with open(raw_filename, 'w', encoding='utf-8') as raw_file:
+            json.dump(articles, raw_file, indent=4)
+        
         articles = articles[:5]  # Limit to the first 5 articles
     
     # Handle pagination if there are more results and not in test mode
@@ -61,8 +81,9 @@ for journal in data['journals']:
     for article in articles:
         # Extract relevant information for each article
         title = article.get('dc:title', '')
-        authors_data = article.get('author', [])
-        authors = '; '.join([author['authname'] for author in authors_data])
+        author_link = next((link['@href'] for link in article['link'] if link['@ref'] == 'author-affiliation'), None)
+        authors_data = fetch_author_details(author_link) if author_link else []
+        authors = '; '.join([f"{author.get('authname', '')} ({author.get('authid', '')})" for author in authors_data])
         affiliations = '; '.join([affil.get('affilname', '') for affil in article.get('affiliation', [])])
         publication_name = article.get('prism:publicationName', '')
         issn = article.get('prism:issn', '')
@@ -91,9 +112,9 @@ for journal in data['journals']:
 
         # Process authors for the unique authors list
         for author in authors_data:
-            author_id = author['authid']
-            author_name = author['authname']
-            if author_id not in unique_authors:
+            author_id = author.get('authid', '')
+            author_name = author.get('authname', '')
+            if author_id and author_id not in unique_authors:
                 unique_authors[author_id] = author_name
 
 # Write all articles to a single CSV file
