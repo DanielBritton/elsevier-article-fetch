@@ -10,6 +10,7 @@ with open('credentials.json', 'r') as file:
     credentials = json.load(file)
     API_KEY = credentials['api_key']
     INST_TOKEN = credentials.get('inst_token', None)
+    TEST_MODE = credentials.get('test_mode', False)
 
 # Initialize the ElsClient with the API key and institutional token
 client = ElsClient(API_KEY)
@@ -91,11 +92,16 @@ for journal in data['journals']:
     
     all_articles = search.results
     
-    # Handle pagination if there are more results
-    while search.next_uri:
-        search.execute(client, get_all=True)
-        all_articles.extend(search.results)
+    # In test mode, limit the number of articles
+    if TEST_MODE:
+        all_articles = all_articles[:5]  # Limit to the first 5 articles
+    
+    # Handle pagination if there are more results and not in test mode
+    if not TEST_MODE:
+        while search.next_uri:
+            search.execute(client, get_all=True)
+            all_articles.extend(search.results)
     
     # Save the fetched articles to a CSV file
     save_articles_to_csv(journal_name, all_articles)
-    print(f"Saved articles for {journal_name}")
+    print(f"Saved articles for {journal_name} (Test mode: {TEST_MODE})")
