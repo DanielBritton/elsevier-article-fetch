@@ -2,6 +2,7 @@ import json
 import csv
 from elsapy.elsclient import ElsClient
 from elsapy.elssearch import ElsSearch
+from elsapy.elsprofile import ElsAuthor
 import os
 
 # Load the credentials from a JSON file
@@ -22,13 +23,25 @@ with open('journals.json', 'r') as file:
 # Directory to save articles
 os.makedirs('articles', exist_ok=True)
 
+# Function to fetch h-index for an author
+def fetch_h_index(author_id):
+    author = ElsAuthor(uri=f"https://api.elsevier.com/content/author/author_id/{author_id}?apiKey={API_KEY}")
+    if author.read(client):
+        return author.data.get('h-index', 'N/A')
+    return 'N/A'
+
 # Function to save articles to a CSV file
 def save_articles_to_csv(journal_name, articles):
     safe_name = "".join([c for c in journal_name if c.isalpha() or c.isdigit() or c == ' ']).rstrip()
     filename = os.path.join('articles', f'{safe_name}.csv')
     
     # Define the header for the CSV file
-    headers = ['Title', 'Authors', 'Publication Name', 'ISSN', 'EID', 'DOI', 'Publication Date', 'Volume', 'Issue', 'Page Range']
+    headers = [
+        'Title', 'Authors', 'H-index', 'Affiliations', 'Publication Name', 'ISSN', 
+        'EID', 'DOI', 'Publication Date', 'Volume', 'Issue', 'Page Range', 
+        'Cited by Count', 'Subtype', 'Source ID', 'Aggregation Type', 
+        'Open Access', 'Teaser', 'Cover Display Date', 'Subtype Description'
+    ]
 
     # Write the data to the CSV file
     with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
@@ -37,7 +50,10 @@ def save_articles_to_csv(journal_name, articles):
         for article in articles:
             # Extract relevant information
             title = article.get('dc:title', '')
-            authors = '; '.join([author['authname'] for author in article.get('author', [])])
+            authors_data = article.get('author', [])
+            authors = '; '.join([author['authname'] for author in authors_data])
+            h_indices = '; '.join([fetch_h_index(author['authid']) for author in authors_data])
+            affiliations = '; '.join([affil.get('affilname', '') for affil in article.get('affiliation', [])])
             publication_name = article.get('prism:publicationName', '')
             issn = article.get('prism:issn', '')
             eid = article.get('eid', '')
@@ -46,9 +62,22 @@ def save_articles_to_csv(journal_name, articles):
             volume = article.get('prism:volume', '')
             issue = article.get('prism:issueIdentifier', '')
             page_range = article.get('prism:pageRange', '')
-            
+            cited_by_count = article.get('citedby-count', 0)
+            subtype = article.get('subtype', '')
+            source_id = article.get('source-id', '')
+            aggregation_type = article.get('aggregationType', '')
+            open_access = article.get('openaccess', '0')
+            teaser = article.get('prism:teaser', '')
+            cover_display_date = article.get('prism:coverDisplayDate', '')
+            subtype_description = article.get('subtypeDescription', '')
+
             # Write the row to the CSV
-            writer.writerow([title, authors, publication_name, issn, eid, doi, pub_date, volume, issue, page_range])
+            writer.writerow([
+                title, authors, h_indices, affiliations, publication_name, issn, eid, doi, 
+                pub_date, volume, issue, page_range, cited_by_count, subtype, 
+                source_id, aggregation_type, open_access, teaser, cover_display_date, 
+                subtype_description
+            ])
 
 # Fetch and save articles for each journal
 for journal in data['journals']:
@@ -63,7 +92,7 @@ for journal in data['journals']:
     all_articles = search.results
     
     # Handle pagination if there are more results
-    while search.has_more_results:
+    while search.next_uri:
         search.execute(client, get_all=True)
         all_articles.extend(search.results)
     
