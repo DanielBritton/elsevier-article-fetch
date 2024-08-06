@@ -1,9 +1,9 @@
 import json
 import csv
 import requests
+import os
 from elsapy.elsclient import ElsClient
 from elsapy.elssearch import ElsSearch
-import os
 
 # Load the credentials from a JSON file
 with open('credentials.json', 'r') as file:
@@ -37,25 +37,17 @@ for journal in data['journals']:
     
     # Initialize the ElsSearch object with the query and request "Complete" view
     search = ElsSearch(query, 'scopus')
-    search.execute(client, view='COMPLETE')
-    
+    search.execute(client, get_all=not TEST_MODE,view='COMPLETE')
+
     articles = search.results
-    
+
     # In test mode, save raw data and limit the number of articles
     if TEST_MODE:
-        # Save raw data to a file
         raw_filename = os.path.join('raw_data', f"{journal_name.replace(' ', '_')}_raw_data.json")
         with open(raw_filename, 'w', encoding='utf-8') as raw_file:
             json.dump(articles, raw_file, indent=4)
-        
         articles = articles[:5]  # Limit to the first 5 articles
-    
-    # Handle pagination if there are more results and not in test mode
-    if not TEST_MODE:
-        while search.next_uri:
-            search.execute(client, get_all=True)
-            articles.extend(search.results)
-    
+
     # Process each article
     for article in articles:
         # Extract relevant information for each article
@@ -93,27 +85,56 @@ for journal in data['journals']:
             author_id = author.get('authid', '')
             author_name = author.get('authname', '')
             if author_id and author_id not in unique_authors:
-                unique_authors[author_id] = author_name
+                unique_authors[author_id] = {
+                    "name": author_name,
+                    "h_index": None
+                }
 
-# Write all articles to a single CSV file
-with open(os.path.join('articles', 'all_articles.csv'), 'w', newline='', encoding='utf-8') as csvfile:
+# Function to get h-index from the Scopus API
+def get_author_h_index(author_id):
+    url = f"https://api.elsevier.com/content/author/author_id/{author_id}?apiKey={API_KEY}&view=metrics"
+    headers = {
+        'Accept': 'application/json',
+        'X-ELS-Insttoken': INST_TOKEN if INST_TOKEN else ''
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        author_data = response.json()
+        try:
+            h_index = author_data['author-retrieval-response'][0]['h-index']
+            return h_index
+        except (KeyError, IndexError):
+            return 'N/A'
+    else:
+        print(f"Failed to fetch data for author ID {author_id}: {response.status_code}")
+        return 'N/A'
+
+# Load existing authors from authors.csv
+authors_file_path = os.path.join('articles', 'authors.csv')
+existing_authors = {}
+
+if os.path.exists(authors_file_path):
+    with open(authors_file_path, 'r', newline='', encoding='utf-8') as csvfile:
+        reader = csv.reader(csvfile)
+        headers = next(reader)
+        for row in reader:
+            author_id = row[0]
+            author_name = row[1]
+            h_index = row[2] if len(row) > 2 else None
+            existing_authors[author_id] = {"name": author_name, "h_index": h_index}
+
+# Merge and update unique_authors with existing_authors
+for author_id, author_info in unique_authors.items():
+    if author_id in existing_authors:
+        author_info['h_index'] = existing_authors[author_id]['h_index']
+    if not author_info['h_index'] or author_info['h_index'] == 'N/A':
+        author_info['h_index'] = get_author_h_index(author_id)
+
+# Update authors.csv without duplicates
+with open(authors_file_path, 'w', newline='', encoding='utf-8') as csvfile:
     writer = csv.writer(csvfile)
-    # Define the header for the CSV file
-    headers = [
-        'Title', 'Authors', 'Affiliations', 'Publication Name', 'ISSN', 
-        'EID', 'DOI', 'Publication Date', 'Volume', 'Issue', 'Page Range', 
-        'Cited by Count', 'Subtype', 'Source ID', 'Aggregation Type', 
-        'Open Access', 'Teaser', 'Cover Display Date', 'Subtype Description'
-    ]
-    writer.writerow(headers)
-    writer.writerows(all_articles_data)
+    writer.writerow(['Author ID', 'Author Name', 'H-Index'])
+    for author_id, author_info in unique_authors.items():
+        writer.writerow([author_id, author_info['name'], author_info['h_index']])
 
-# Write unique authors to a CSV file
-with open(os.path.join('articles', 'authors.csv'), 'w', newline='', encoding='utf-8') as csvfile:
-    writer = csv.writer(csvfile)
-    # Define the header for the CSV file
-    writer.writerow(['Author ID', 'Author Name'])
-    for author_id, author_name in unique_authors.items():
-        writer.writerow([author_id, author_name])
-
-print(f"Saved all articles and authors data (Test mode: {TEST_MODE})")
+print(f"Updated authors.csv with H-Index data. (Test mode: {TEST_MODE})")
