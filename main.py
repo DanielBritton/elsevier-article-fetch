@@ -2,15 +2,32 @@ import json
 import csv
 import requests
 import os
+import logging
 from elsapy.elsclient import ElsClient
 from elsapy.elssearch import ElsSearch
 
+# Set up logging configuration
+logging.basicConfig(
+    filename='article_fetch.log',  # Log file
+    level=logging.DEBUG,  # Log level
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Log format
+    datefmt='%Y-%m-%d %H:%M:%S'  # Date format
+)
+
 # Load the credentials from a JSON file
-with open('credentials.json', 'r') as file:
-    credentials = json.load(file)
-    API_KEY = credentials['api_key']
-    INST_TOKEN = credentials.get('inst_token', None)
-    TEST_MODE = credentials.get('test_mode', False)
+try:
+    with open('credentials.json', 'r') as file:
+        credentials = json.load(file)
+        API_KEY = credentials['api_key']
+        INST_TOKEN = credentials.get('inst_token', None)
+        TEST_MODE = credentials.get('test_mode', False)
+    logging.info("Credentials loaded successfully.")
+except FileNotFoundError:
+    logging.error("Credentials file not found.")
+    raise
+except KeyError:
+    logging.error("API key missing in credentials file.")
+    raise
 
 # Initialize the ElsClient with the API key and institutional token
 client = ElsClient(API_KEY)
@@ -18,8 +35,13 @@ if INST_TOKEN:
     client.inst_token = INST_TOKEN
 
 # Load the JSON data for journals from a file
-with open('journals.json', 'r') as file:
-    data = json.load(file)
+try:
+    with open('journals.json', 'r') as file:
+        data = json.load(file)
+    logging.info("Journals data loaded successfully.")
+except FileNotFoundError:
+    logging.error("Journals file not found.")
+    raise
 
 # Directory to save CSV files and raw data
 os.makedirs('articles', exist_ok=True)
@@ -35,9 +57,16 @@ for journal in data['journals']:
     journal_name = journal['name']
     query = f"ISSN({issn})"
     
+    logging.info(f"Fetching articles for journal: {journal_name} (ISSN: {issn})")
+    
     # Initialize the ElsSearch object with the query and request "Complete" view
     search = ElsSearch(query, 'scopus')
-    search.execute(client, get_all=not TEST_MODE,view='COMPLETE')
+    try:
+        search.execute(client, get_all=not TEST_MODE, view='COMPLETE', count=25)
+        logging.info(f"Articles fetched successfully for {journal_name}.")
+    except Exception as e:
+        logging.error(f"Error fetching articles for {journal_name}: {e}")
+        continue
 
     articles = search.results
 
@@ -79,6 +108,8 @@ for journal in data['journals']:
             source_id, aggregation_type, open_access, teaser, cover_display_date, 
             subtype_description
         ])
+        
+        logging.debug(f"Processed article: {title} (EID: {eid})")
 
         # Process authors for the unique authors list
         for author in authors_data:
@@ -97,16 +128,19 @@ def get_author_h_index(author_id):
         'Accept': 'application/json',
         'X-ELS-Insttoken': INST_TOKEN if INST_TOKEN else ''
     }
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
         author_data = response.json()
         try:
             h_index = author_data['author-retrieval-response'][0]['h-index']
+            logging.info(f"Fetched h-index for author ID {author_id}: {h_index}")
             return h_index
         except (KeyError, IndexError):
+            logging.warning(f"H-index not available for author ID {author_id}")
             return 'N/A'
-    else:
-        print(f"Failed to fetch data for author ID {author_id}: {response.status_code}")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to fetch data for author ID {author_id}: {e}")
         return 'N/A'
 
 # Load existing authors from authors.csv
@@ -122,6 +156,7 @@ if os.path.exists(authors_file_path):
             author_name = row[1]
             h_index = row[2] if len(row) > 2 else None
             existing_authors[author_id] = {"name": author_name, "h_index": h_index}
+    logging.info("Existing authors data loaded from authors.csv.")
 
 # Merge and update unique_authors with existing_authors
 for author_id, author_info in unique_authors.items():
@@ -136,5 +171,6 @@ with open(authors_file_path, 'w', newline='', encoding='utf-8') as csvfile:
     writer.writerow(['Author ID', 'Author Name', 'H-Index'])
     for author_id, author_info in unique_authors.items():
         writer.writerow([author_id, author_info['name'], author_info['h_index']])
+    logging.info("Updated authors.csv with H-Index data. (Test mode: %s)", TEST_MODE)
 
 print(f"Updated authors.csv with H-Index data. (Test mode: {TEST_MODE})")
