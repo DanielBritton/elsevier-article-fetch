@@ -45,11 +45,22 @@ def get_author_h_index(author_id):
             data = response.json()
             h_index = data['author-retrieval-response'][0].get('h-index', 'N/A')
             return h_index
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error fetching h-index for author ID {author_id}: {e}")
+        except requests.exceptions.HTTPError as http_err:
+            if response.status_code == 429:
+                logging.error(f"Too Many Requests: Rate limit exceeded for author ID {author_id}. "
+                              f"Attempt {attempt + 1}/{max_retries}. Full response: {response.text}")
+            else:
+                logging.error(f"HTTP error occurred: {http_err}. Full response: {response.text}")
             if attempt < max_retries - 1:
                 time.sleep(delay)
                 delay *= backoff_factor  # Increase the delay for the next retry
+            else:
+                return 'N/A'
+        except requests.exceptions.RequestException as e:
+            logging.error(f"RequestException for author ID {author_id}: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+                delay *= backoff_factor
             else:
                 return 'N/A'
 
