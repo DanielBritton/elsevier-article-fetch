@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import requests
+import time
 
 # Set up logging configuration
 logging.basicConfig(
@@ -17,6 +18,7 @@ try:
     with open('credentials.json', 'r') as file:
         credentials = json.load(file)
         API_KEY = credentials['api_key']
+        INST_TOKEN = credentials.get('inst_token', '')
     logging.info("Credentials loaded successfully.")
 except FileNotFoundError:
     logging.error("Credentials file not found.")
@@ -25,18 +27,31 @@ except KeyError:
     logging.error("API key missing in credentials file.")
     raise
 
-# Function to fetch h-index from the Scopus API
+# Function to fetch h-index from the Scopus API with exponential backoff
 def get_author_h_index(author_id):
-    url = f"https://api.elsevier.com/content/author/author_id/{author_id}?apiKey={API_KEY}&view=metrics"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        h_index = data['author-retrieval-response'][0].get('h-index', 'N/A')
-        return h_index
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching h-index for author ID {author_id}: {e}")
-        return 'N/A'
+    url = f"https://api.elsevier.com/content/author/author_id/{author_id}?view=metrics"
+    headers = {
+        'X-ELS-APIKey': API_KEY,
+        'X-ELS-Insttoken': INST_TOKEN
+    }
+    max_retries = 5
+    backoff_factor = 2
+    delay = 1  # Initial delay in seconds
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            h_index = data['author-retrieval-response'][0].get('h-index', 'N/A')
+            return h_index
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error fetching h-index for author ID {author_id}: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+                delay *= backoff_factor  # Increase the delay for the next retry
+            else:
+                return 'N/A'
 
 # Define the path for the articles directory
 articles_directory = 'articles'
@@ -74,7 +89,7 @@ if os.path.exists(articles_file_path):
         try:
             authors_index = header.index('Authors')
         except ValueError:
-            logging.error("'Authors' column not found in all_articles.csv.")
+            logging.error("'Authors' column not found in articles.csv.")
             raise
 
         for row in reader:
