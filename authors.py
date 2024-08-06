@@ -4,6 +4,7 @@ import logging
 import os
 import requests
 import time
+from datetime import datetime
 
 # Set up logging configuration
 logging.basicConfig(
@@ -47,8 +48,14 @@ def get_author_h_index(author_id):
             return h_index
         except requests.exceptions.HTTPError as http_err:
             if response.status_code == 429:
-                logging.error(f"Too Many Requests: Rate limit exceeded for author ID {author_id}. "
-                              f"Attempt {attempt + 1}/{max_retries}. Full response: {response.text}")
+                reset_time = response.headers.get('X-RateLimit-Reset')
+                if reset_time:
+                    reset_time = datetime.utcfromtimestamp(int(reset_time)).strftime('%Y-%m-%d %H:%M:%S UTC')
+                    logging.error(f"Too Many Requests: Rate limit exceeded for author ID {author_id}. "
+                                  f"Attempt {attempt + 1}/{max_retries}. Full response: {response.text}")
+                    logging.error(f"Rate limit resets at: {reset_time}")
+                    print(f"Rate limit exceeded. You can retry after: {reset_time}")
+                    exit(1)
             else:
                 logging.error(f"HTTP error occurred: {http_err}. Full response: {response.text}")
             if attempt < max_retries - 1:
