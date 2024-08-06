@@ -14,89 +14,81 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
-# Load API credentials from the home directory
+# Load API credentials
 try:
     with open('credentials.json', 'r') as file:
         credentials = json.load(file)
         API_KEY = credentials['api_key']
         INST_TOKEN = credentials.get('inst_token', '')
     logging.info("Credentials loaded successfully.")
-except FileNotFoundError:
-    logging.error("Credentials file not found.")
-    raise
-except KeyError:
-    logging.error("API key missing in credentials file.")
+except (FileNotFoundError, KeyError) as e:
+    logging.error(f"Error loading credentials: {e}")
     raise
 
-# Function to fetch h-index from the Scopus API with exponential backoff
-def get_authors_h_index(author_ids):
+# Function to fetch author details from the Scopus API with exponential backoff
+def fetch_author_details(author_ids):
     ids_string = ','.join(author_ids)
     url = f"https://api.elsevier.com/content/author/author_id/{ids_string}?view=metrics"
     headers = {
         'X-ELS-APIKey': API_KEY,
         'X-ELS-Insttoken': INST_TOKEN
     }
-    max_retries = 5
-    backoff_factor = 2
-    delay = 1  # Initial delay in seconds
-    results = {}
+    max_retries, backoff_factor, delay = 5, 2, 1
+    author_details = {}
 
     for attempt in range(max_retries):
         try:
             response = requests.get(url, headers=headers)
             response.raise_for_status()
             data = response.json()
-            for item in data['author-retrieval-response']:
-                author_id = item['coredata']['dc:identifier'].split(':')[-1]
-                h_index = item.get('h-index', 'N/A')
-                results[author_id] = h_index
-            return results
+            for author in data['author-retrieval-response']:
+                author_id = author['coredata']['dc:identifier'].split(':')[-1]
+                author_details[author_id] = author
+            return author_details
         except requests.exceptions.HTTPError as http_err:
             if response.status_code == 429:
                 reset_time = response.headers.get('X-RateLimit-Reset')
                 if reset_time:
                     reset_time = datetime.utcfromtimestamp(int(reset_time)).strftime('%Y-%m-%d %H:%M:%S UTC')
-                    logging.error(f"Too Many Requests: Rate limit exceeded for author IDs {author_ids}. "
-                                  f"Attempt {attempt + 1}/{max_retries}. Full response: {response.text}")
-                    logging.error(f"Rate limit resets at: {reset_time}")
-                    print(f"Rate limit exceeded. You can retry after: {reset_time}")
+                    logging.error(f"Rate limit exceeded. Retry after: {reset_time}. Response: {response.text}")
+                    print(f"Rate limit exceeded. Retry after: {reset_time}")
                     exit(1)
             else:
-                logging.error(f"HTTP error occurred: {http_err}. Full response: {response.text}")
-            if attempt < max_retries - 1:
-                time.sleep(delay)
-                delay *= backoff_factor  # Increase the delay for the next retry
-            else:
-                return results
-        except requests.exceptions.RequestException as e:
-            logging.error(f"RequestException for author IDs {author_ids}: {e}")
+                logging.error(f"HTTP error: {http_err}. Response: {response.text}")
             if attempt < max_retries - 1:
                 time.sleep(delay)
                 delay *= backoff_factor
             else:
-                return results
+                return author_details
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Request error: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+                delay *= backoff_factor
+            else:
+                return author_details
 
 # Define the path for the articles directory
 articles_directory = 'articles'
-
-# Define the path for the authors file
 authors_file_path = os.path.join(articles_directory, 'authors.csv')
 existing_authors = {}
 
 # Check if authors.csv exists and load existing authors
 if os.path.exists(authors_file_path):
     with open(authors_file_path, 'r', newline='', encoding='utf-8') as csvfile:
-        reader = csv.reader(csvfile)
-        next(reader)  # Skip header
+        reader = csv.DictReader(csvfile)
         for row in reader:
-            author_id, author_name, h_index = row
-            existing_authors[author_id] = {"name": author_name, "h_index": h_index}
+            existing_authors[row['Author ID']] = row
     logging.info("Existing authors data loaded from authors.csv.")
 else:
     # Create authors.csv and write headers
     with open(authors_file_path, 'w', newline='', encoding='utf-8') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['Author ID', 'Author Name', 'H-Index'])
+        writer.writerow([
+            'Author ID', 'EID', 'URL', 'Full Name', 'Surname', 'Given Name', 'Affiliation Name', 'Affiliation ID', 
+            'Affiliation City', 'Affiliation Country', 'Affiliation History', 'Citation Count', 'H-Index', 
+            'Document Count', 'Subject Areas'
+        ])
     logging.info("Created new authors.csv with headers.")
 
 # Log and print the number of unique authors after loading existing data
@@ -137,31 +129,59 @@ if os.path.exists(articles_file_path):
 
                     if author_id not in existing_authors:
                         new_authors.append((author_id, author_name))
-                        existing_authors[author_id] = {"name": author_name, "h_index": 'N/A'}  # Temporary placeholder
+                        # Temporary placeholder to mark new authors
+                        existing_authors[author_id] = {"name": author_name, "h_index": 'N/A'}
                 except ValueError as e:
                     logging.error(f"Error parsing author information from string: {author}. Error: {e}")
 
-# Log and print the number of unique authors after processing new authors
-num_total_authors_before_update = len(existing_authors)
-logging.info(f"Number of unique authors before API update: {num_total_authors_before_update}")
-print(f"Number of unique authors before API update: {num_total_authors_before_update}")
+# Log the total number of new authors for API calls
+logging.info(f"Total number of new authors for API calls: {len(new_authors)}")
 
-# Batch process new authors in groups of 25
+# Fetch and update all details for new authors
 batch_size = 25
 for i in range(0, len(new_authors), batch_size):
     batch = new_authors[i:i + batch_size]
     author_ids = [author[0] for author in batch]
-    h_indices = get_authors_h_index(author_ids)
+    author_details = fetch_author_details(author_ids)
 
-    for author_id, author_name in batch:
-        h_index = h_indices.get(author_id, 'N/A')
-        existing_authors[author_id]['h_index'] = h_index
+    with open(authors_file_path, 'a', newline='', encoding='utf-8') as writefile:
+        writer = csv.writer(writefile)
+        for author_id, name in batch:
+            details = author_details.get(author_id, {})
+            coredata = details.get('coredata', {})
+            profile = details.get('author-profile', {})
 
-        # Incrementally update authors.csv
-        with open(authors_file_path, 'a', newline='', encoding='utf-8') as writefile:
-            writer = csv.writer(writefile)
-            writer.writerow([author_id, author_name, h_index])
-        logging.info(f"Added/Updated author: {author_name} (ID: {author_id}) with h-index {h_index}.")
+            eid = coredata.get('eid', '')
+            url = coredata.get('prism:url', '')
+            full_name = coredata.get('dc:creator', name)
+            surname = profile.get('preferred-name', {}).get('surname', '')
+            given_name = profile.get('preferred-name', {}).get('given-name', '')
+            affiliation_current = profile.get('affiliation-current', {})
+            aff_name = affiliation_current.get('affiliation-name', '')
+            aff_id = affiliation_current.get('affiliation-id', '')
+            aff_city = affiliation_current.get('affiliation-city', '')
+            aff_country = affiliation_current.get('affiliation-country', '')
+
+            aff_history = '; '.join([
+                f"{aff['affiliation-name']} ({aff.get('start-date', 'N/A')} - {aff.get('end-date', 'N/A')})"
+                for aff in profile.get('affiliation-history', [])
+            ])
+
+            citation_count = profile.get('citation-count', 'N/A')
+            h_index = profile.get('h-index', 'N/A')
+            doc_count = profile.get('document-count', 'N/A')
+
+            subject_areas = '; '.join([
+                f"{area['area']} ({area['abbrev']})"
+                for area in profile.get('subject-area', [])
+            ])
+
+            # Write author details to CSV
+            writer.writerow([
+                author_id, eid, url, full_name, surname, given_name, aff_name, aff_id, 
+                aff_city, aff_country, aff_history, citation_count, h_index, doc_count, subject_areas
+            ])
+            logging.info(f"Added/Updated author: {full_name} (ID: {author_id}) with h-index {h_index}.")
 
 # Log and print the final number of unique authors
 num_final_authors = len(existing_authors)
