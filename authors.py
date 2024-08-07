@@ -28,7 +28,7 @@ except (FileNotFoundError, KeyError) as e:
 # Function to fetch author details from the Scopus API with exponential backoff
 def fetch_author_details(author_ids):
     ids_string = ','.join(author_ids)
-    url = f"https://api.elsevier.com/content/author/author_id/{ids_string}?view=metrics"
+    url = f"https://api.elsevier.com/content/author?author_id={ids_string}&apiKey={API_KEY}&view=enhanced"
     headers = {
         'X-ELS-APIKey': API_KEY,
         'X-ELS-Insttoken': INST_TOKEN
@@ -39,6 +39,7 @@ def fetch_author_details(author_ids):
     for attempt in range(max_retries):
         try:
             response = requests.get(url, headers=headers)
+            logging.debug(f"Response content: {response.text}")
             response.raise_for_status()
             data = response.json()
             for author in data['author-retrieval-response']:
@@ -153,27 +154,27 @@ for i in range(0, len(new_authors), batch_size):
 
             eid = coredata.get('eid', '')
             url = coredata.get('prism:url', '')
-            full_name = coredata.get('dc:creator', name)
+            full_name = profile.get('preferred-name', {}).get('indexed-name', name)
             surname = profile.get('preferred-name', {}).get('surname', '')
             given_name = profile.get('preferred-name', {}).get('given-name', '')
-            affiliation_current = profile.get('affiliation-current', {})
-            aff_name = affiliation_current.get('affiliation-name', '')
-            aff_id = affiliation_current.get('affiliation-id', '')
-            aff_city = affiliation_current.get('affiliation-city', '')
-            aff_country = affiliation_current.get('affiliation-country', '')
+            affiliation_current = profile.get('affiliation-current', {}).get('affiliation', {})
+            aff_name = affiliation_current.get('afdispname', '')
+            aff_id = affiliation_current.get('@affiliation-id', '')
+            aff_city = affiliation_current.get('address', {}).get('city', '')
+            aff_country = affiliation_current.get('address', {}).get('country', '')
 
             aff_history = '; '.join([
-                f"{aff['affiliation-name']} ({aff.get('start-date', 'N/A')} - {aff.get('end-date', 'N/A')})"
-                for aff in profile.get('affiliation-history', [])
+                f"{aff['ip-doc']['afdispname']} (ID: {aff['@affiliation-id']})"
+                for aff in profile.get('affiliation-history', {}).get('affiliation', [])
             ])
 
-            citation_count = profile.get('citation-count', 'N/A')
-            h_index = profile.get('h-index', 'N/A')
-            doc_count = profile.get('document-count', 'N/A')
+            citation_count = coredata.get('citation-count', 'N/A')
+            h_index = details.get('h-index', 'N/A')
+            doc_count = coredata.get('document-count', 'N/A')
 
             subject_areas = '; '.join([
-                f"{area['area']} ({area['abbrev']})"
-                for area in profile.get('subject-area', [])
+                f"{area['$']} ({area['@code']})"
+                for area in profile.get('subject-areas', {}).get('subject-area', [])
             ])
 
             # Write author details to CSV
