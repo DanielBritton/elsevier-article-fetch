@@ -31,7 +31,8 @@ def fetch_author_details(author_ids):
     url = f"https://api.elsevier.com/content/author?author_id={ids_string}&apiKey={API_KEY}&view=enhanced"
     headers = {
         'X-ELS-APIKey': API_KEY,
-        'X-ELS-Insttoken': INST_TOKEN
+        'X-ELS-Insttoken': INST_TOKEN,
+        'Accept': 'application/json'
     }
     max_retries, backoff_factor, delay = 5, 2, 1
     author_details = {}
@@ -39,13 +40,18 @@ def fetch_author_details(author_ids):
     for attempt in range(max_retries):
         try:
             response = requests.get(url, headers=headers)
-            logging.debug(f"Response content: {response.text}")
+            logging.debug(f"Response status code: {response.status_code}, Response text: {response.text}")
             response.raise_for_status()
             data = response.json()
-            for author in data['author-retrieval-response']:
-                author_id = author['coredata']['dc:identifier'].split(':')[-1]
-                author_details[author_id] = author
-            return author_details
+            if 'author-retrieval-response-list' in data and 'author-retrieval-response' in data['author-retrieval-response-list']:
+                author_responses = data['author-retrieval-response-list']['author-retrieval-response']
+                for author in author_responses:
+                    author_id = author['coredata']['dc:identifier'].split(':')[-1]
+                    author_details[author_id] = author
+                return author_details
+            else:
+                logging.error(f"Key 'author-retrieval-response' not found in response: {data}")
+                continue
         except requests.exceptions.HTTPError as http_err:
             if response.status_code == 429:
                 reset_time = response.headers.get('X-RateLimit-Reset')
@@ -60,6 +66,7 @@ def fetch_author_details(author_ids):
                 time.sleep(delay)
                 delay *= backoff_factor
             else:
+                logging.error(f"Max retries reached. Returning empty author details.")
                 return author_details
         except requests.exceptions.RequestException as e:
             logging.error(f"Request error: {e}")
@@ -67,7 +74,9 @@ def fetch_author_details(author_ids):
                 time.sleep(delay)
                 delay *= backoff_factor
             else:
+                logging.error(f"Max retries reached. Returning empty author details.")
                 return author_details
+    return author_details
 
 # Define the path for the articles directory
 articles_directory = 'articles'
@@ -86,9 +95,8 @@ else:
     with open(authors_file_path, 'w', newline='', encoding='utf-8') as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow([
-            'Author ID', 'EID', 'URL', 'Full Name', 'Surname', 'Given Name', 'Affiliation Name', 'Affiliation ID', 
-            'Affiliation City', 'Affiliation Country', 'Affiliation History', 'Citation Count', 'H-Index', 
-            'Document Count', 'Subject Areas'
+            'Author ID', 'EID', 'Full Name', 'Surname', 'Given Name', 'Affiliation Name', 'Affiliation ID', 
+            'Citation Count', 'Cited By Count', 'H-Index', 'Document Count', 'Subject Areas', 'Coauthor Count', 'Publication Start Year', 'Publication End Year'
         ])
     logging.info("Created new authors.csv with headers.")
 
@@ -143,7 +151,7 @@ batch_size = 25
 for i in range(0, len(new_authors), batch_size):
     batch = new_authors[i:i + batch_size]
     author_ids = [author[0] for author in batch]
-    author_details = fetch_author_details(author_ids)
+    author_details = fetch_author_details(author_ids) or {}
 
     with open(authors_file_path, 'a', newline='', encoding='utf-8') as writefile:
         writer = csv.writer(writefile)
@@ -153,34 +161,31 @@ for i in range(0, len(new_authors), batch_size):
             profile = details.get('author-profile', {})
 
             eid = coredata.get('eid', '')
-            url = coredata.get('prism:url', '')
             full_name = profile.get('preferred-name', {}).get('indexed-name', name)
             surname = profile.get('preferred-name', {}).get('surname', '')
             given_name = profile.get('preferred-name', {}).get('given-name', '')
             affiliation_current = profile.get('affiliation-current', {}).get('affiliation', {})
-            aff_name = affiliation_current.get('afdispname', '')
-            aff_id = affiliation_current.get('@affiliation-id', '')
-            aff_city = affiliation_current.get('address', {}).get('city', '')
-            aff_country = affiliation_current.get('address', {}).get('country', '')
-
-            aff_history = '; '.join([
-                f"{aff['ip-doc']['afdispname']} (ID: {aff['@affiliation-id']})"
-                for aff in profile.get('affiliation-history', {}).get('affiliation', [])
-            ])
-
+            aff_name = affiliation_current.get('ip-doc', {}).get('afdispname', '') if affiliation_current and affiliation_current.get('ip-doc') else ''
+            aff_id = affiliation_current.get('@affiliation-id', '') if affiliation_current else ''
+       
             citation_count = coredata.get('citation-count', 'N/A')
+            cited_by_count = coredata.get('cited-by-count', 'N/A')
             h_index = details.get('h-index', 'N/A')
             doc_count = coredata.get('document-count', 'N/A')
+            coauthor_count = details.get('coauthor-count', 'N/A')
+            pub_start_year = profile.get('publication-range', {}).get('@start', 'N/A')
+            pub_end_year = profile.get('publication-range', {}).get('@end', 'N/A')
 
             subject_areas = '; '.join([
-                f"{area['$']} ({area['@code']})"
+                f"{area['$']}"
                 for area in profile.get('subject-areas', {}).get('subject-area', [])
             ])
 
             # Write author details to CSV
             writer.writerow([
-                author_id, eid, url, full_name, surname, given_name, aff_name, aff_id, 
-                aff_city, aff_country, aff_history, citation_count, h_index, doc_count, subject_areas
+                author_id, eid, full_name, surname, given_name, aff_name, aff_id, 
+                citation_count, cited_by_count, h_index, doc_count, subject_areas, 
+                coauthor_count, pub_start_year, pub_end_year
             ])
             logging.info(f"Added/Updated author: {full_name} (ID: {author_id}) with h-index {h_index}.")
 
