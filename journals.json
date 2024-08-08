@@ -1,0 +1,28 @@
+{
+    "journals": [
+        {
+            "name": "Journal of Consumer Psychology",
+            "issn": "1057-7408"
+        },
+        {
+            "name": "Journal of Consumer Research",
+            "issn": "0093-5301"
+        },
+        {
+            "name": "Journal of Marketing",
+            "issn": "0022-2429"
+        },
+        {
+            "name": "Journal of Marketing Research",
+            "issn": "0022-2437"
+        },
+        {
+            "name": "Journal of the Academy of Marketing Science",
+            "issn": "0092-0703"
+        },
+        {
+            "name": "Marketing Science",
+            "issn": "0732-2399"
+        }
+    ]
+}
