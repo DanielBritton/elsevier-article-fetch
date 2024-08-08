@@ -165,6 +165,10 @@ for i in range(0, len(new_authors), batch_size):
             surname = profile.get('preferred-name', {}).get('surname', '')
             given_name = profile.get('preferred-name', {}).get('given-name', '')
             affiliation_current = profile.get('affiliation-current', {}).get('affiliation', {})
+            # Handle multiple affiliations
+            if isinstance(affiliation_current, list):
+                affiliation_current = affiliation_current[0]  # Take the first affiliation
+
             aff_name = affiliation_current.get('ip-doc', {}).get('afdispname', '') if affiliation_current and affiliation_current.get('ip-doc') else ''
             aff_id = affiliation_current.get('@affiliation-id', '') if affiliation_current else ''
        
