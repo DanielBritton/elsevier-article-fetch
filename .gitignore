@@ -12,3 +12,4 @@ credentials.json
 articles/authors.csv
 *.log
 article_fetch.log
+dump.json
