@@ -7,9 +7,7 @@ raw_data/Journal_of_Marketing_Research_raw_data.json
 raw_data/Journal_of_Marketing_raw_data.json
 raw_data/Journal_of_Consumer_Research_raw_data.json
 raw_data/Journal_of_Consumer_Psychology_raw_data.json
-/articles
 credentials.json
 articles/authors.csv
-*.log
 article_fetch.log
 dump.json
