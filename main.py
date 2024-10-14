@@ -92,7 +92,7 @@ def process_journal(journal):
             writer.writerow(['Title', 'Authors', 'Affiliations', 'Publication Name', 'ISSN', 'EID', 'DOI', 
                              'Publication Date', 'Volume', 'Issue', 'Page Range', 'Cited by Count', 'Subtype', 
                              'Source ID', 'Aggregation Type', 'Open Access', 'Teaser', 'Cover Display Date', 
-                             'Subtype Description'])
+                             'Subtype Description', 'Keywords', 'Funding', 'Description'])
             for article in all_articles:
                 title = article.get('dc:title', '')
                 authors_data = article.get('author', [])
@@ -114,12 +114,15 @@ def process_journal(journal):
                 teaser = article.get('prism:teaser', '')
                 cover_display_date = article.get('prism:coverDisplayDate', '')
                 subtype_description = article.get('subtypeDescription', '')
+                keywords = article.get('authkeywords', '')
+                funding = article.get('fund-no', 'Undefined')
+                description = article.get('dc:description', '')
 
                 writer.writerow([
                     title, authors, affiliations, publication_name, issn, eid, doi, 
                     pub_date, volume, issue, page_range, cited_by_count, subtype, 
                     source_id, aggregation_type, open_access, teaser, cover_display_date, 
-                    subtype_description
+                    subtype_description, keywords, funding, description
                 ])
                 logging.debug(f"Processed article: {title} (EID: {eid})")
 
@@ -145,7 +148,7 @@ with open(combined_filename, 'w', newline='', encoding='utf-8') as combined_csv:
     writer.writerow(['Title', 'Authors', 'Affiliations', 'Publication Name', 'ISSN', 'EID', 'DOI', 
                      'Publication Date', 'Volume', 'Issue', 'Page Range', 'Cited by Count', 'Subtype', 
                      'Source ID', 'Aggregation Type', 'Open Access', 'Teaser', 'Cover Display Date', 
-                     'Subtype Description'])
+                     'Subtype Description', 'Keywords', 'Funding', 'Description'])
     
     for journal in data['journals']:
         journal_name = journal['name'].replace(' ', '_')
