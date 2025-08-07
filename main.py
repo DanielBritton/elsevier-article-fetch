@@ -23,6 +23,14 @@ try:
         API_KEY = credentials['api_key']
         INST_TOKEN = credentials.get('inst_token', None)
         TEST_MODE = credentials.get('test_mode', False)
+
+    # Validate API key is not the default/placeholder
+    default_markers = {"YOUR_API_KEY_HERE", "INSERT_API_KEY_HERE", ""}
+    if API_KEY is None or API_KEY.strip() in default_markers:
+        message = f"No valid Elsevier API key provided. Update 'api_key' in credentials.json."
+        print(message)
+        logging.warning(message)
+        sys.exit(1)
     logging.info("Credentials loaded successfully.")
 except FileNotFoundError:
     logging.error("Credentials file not found.")
