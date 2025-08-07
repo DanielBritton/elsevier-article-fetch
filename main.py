@@ -2,13 +2,13 @@ import json
 import csv
 import os
 import logging
+import sys
 from elsapy.elsclient import ElsClient
 from elsapy.elssearch import ElsSearch
 from time import sleep
 
 # Set up logging configuration
 logging.basicConfig(
-    filename='article_fetch.log',
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
@@ -78,6 +78,13 @@ def process_journal(journal):
         logging.info(f"Fetched {len(all_articles)} articles for {journal_name}.")
     except Exception as e:
         logging.error(f"Error fetching articles for {journal_name}: {e}")
+        # On 401 Unauthorized, print exception and status code, then exit
+        message = str(e)
+        if ("401" in message) or ("Unauthorized" in message):
+            print(f"Unauthorized error when fetching {journal_name}: {message}")
+            logging.error(f"Unauthorized error when fetching {journal_name}: {message}")
+            sys.exit(1)
+
         if max_retries > 0:
             max_retries -= 1
             sleep(5)  # Backoff before retrying

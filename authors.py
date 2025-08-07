@@ -60,6 +60,10 @@ def fetch_author_details(author_ids):
                     logging.error(f"Rate limit exceeded. Retry after: {reset_time}. Response: {response.text}")
                     print(f"Rate limit exceeded. Retry after: {reset_time}")
                     exit(1)
+            elif response.status_code == 401:
+                logging.error(f"Unauthorized (401). Check API key and institutional token. Response: {response.text}")
+                print(f"Unauthorized (401). Check API key and institutional token.\n{response.text}")
+                exit(1)
             else:
                 logging.error(f"HTTP error: {http_err}. Response: {response.text}")
             if attempt < max_retries - 1:
