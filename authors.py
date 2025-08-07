@@ -7,8 +7,9 @@ import time
 from datetime import datetime
 
 # Set up logging configuration
+os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
-    filename='hindex_fetch.log',
+    filename=os.path.join('logs', 'hindex_fetch.log'),
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'

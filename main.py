@@ -8,7 +8,9 @@ from elsapy.elssearch import ElsSearch
 from time import sleep
 
 # Set up logging configuration
+os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
+    filename=os.path.join('logs', 'article_fetch.log'),
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
